@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "hoshidicts.h"
+#include "hoshidicts_jni_strings.hpp"
 
 namespace {
     struct LookupObject {
@@ -20,10 +21,17 @@ namespace {
     LookupObject *as_object(jlong handle) { return reinterpret_cast<LookupObject *>(handle); }
 
     std::string jstring_to_std_string(JNIEnv *env, jstring input) {
-        const char *chars = env->GetStringUTFChars(input, nullptr);
-        std::string output(chars);
-        env->ReleaseStringUTFChars(input, chars);
-        return output;
+        const jsize length = env->GetStringLength(input);
+        std::u16string utf16(static_cast<size_t>(length), u'\0');
+        const jchar *chars = env->GetStringChars(input, nullptr);
+        if (chars == nullptr) {
+            return {};
+        }
+        for (jsize i = 0; i < length; ++i) {
+            utf16[static_cast<size_t>(i)] = static_cast<char16_t>(chars[i]);
+        }
+        env->ReleaseStringChars(input, chars);
+        return hoshidicts::jni::utf16_to_utf8(utf16);
     }
 
     template<typename Fn>
@@ -37,7 +45,13 @@ namespace {
     }
 
     jstring new_string(JNIEnv *env, const std::string &value) {
-        return env->NewStringUTF(value.c_str());
+        const std::u16string utf16 = hoshidicts::jni::utf8_to_utf16(value);
+        std::vector<jchar> chars;
+        chars.reserve(utf16.size());
+        for (char16_t c : utf16) {
+            chars.push_back(static_cast<jchar>(c));
+        }
+        return env->NewString(chars.empty() ? nullptr : chars.data(), static_cast<jsize>(chars.size()));
     }
 
     jobject new_import_result(JNIEnv *env, bool success, const std::string &title,
